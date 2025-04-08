@@ -14,6 +14,32 @@ var clientId = generateId(); //can be windows name
 function initializeApp(){
     const queueList = localStorage.getItem("queueList");
     const statusList = localStorage.getItem("statusList");
+    const batchImageList = localStorage.getItem("batchImageList");
+    if(batchImageList){
+        document.getElementById("batchImageInput").value = batchImageList;
+    }
+    
+    // 添加文件选择事件监听
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        const files = e.target.files;
+        let paths = '';
+        for (let i = 0; i < files.length; i++) {
+            paths += (files[i].path || files[i].name) + '\n';
+        }
+        document.getElementById('batchImageInput').value = paths;
+    });
+    
+    // 添加工作流文件选择事件监听
+    document.getElementById('workflowFileInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('workflowTxtArea').value = e.target.result;
+            };
+            reader.readAsText(file);
+        }
+    });
 
     if(queueList){
         parsedQC = JSON.parse(queueList);
@@ -35,6 +61,7 @@ function initializeApp(){
 function clearStorage(){
     localStorage.removeItem("queueList");
     localStorage.removeItem("statusList");
+    localStorage.removeItem("batchImageList");
 }
 
 function generateId(){
@@ -90,7 +117,7 @@ function connectToWS(){
         } else {
             leng = event.data.size
         }
-        console.log("onmessage. size: " + leng + ", content: " + event.data);
+        //console.log("onmessage. size: " + leng + ", content: " + event.data);
         const message = JSON.parse(event.data);
 
         if(!isBusy){
@@ -158,11 +185,17 @@ async function queue_prompt(){
     let payload = `{"client_id":"${clientId}", "prompt":${prompt}}`;
     const response = await fetch(COMFTY_URL+"/prompt", {
         method: "POST",
-        mode: "cors", // no-cors, *cors, same-origin
-        credentials: "same-origin", // include, *same-origin, omit
-        headers: {"Content-Type": "application/json"},
-        // referrerPolicy: "strict-origin-when-cross-origin", // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-ur 
-        body: payload, // body data type must match "Content-Type" header
+        mode: "cors",
+        credentials: "same-origin",
+        headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        body: payload
+      }).catch(error => {
+        console.error('Fetch error:', error);
+        pauseQueues();
+        return { error: true };
       });
     const responseJson = await response.json();
 
@@ -211,9 +244,27 @@ function processPrompt(){
 // Queue list
 function saveItem(){
     const activePrompt = document.getElementById("workflowTxtArea").value;
+    const batchImages = document.getElementById("batchImageInput").value;
     
     if(!activePrompt){
         //error, don't close
+    }
+    
+    // Process batch images if provided
+    if(batchImages){
+        const imagePaths = batchImages.split('\n').filter(path => path.trim() !== '');
+        imagePaths.forEach(imagePath => {
+            // 替换所有图片参数
+            let modifiedPrompt = activePrompt;
+            modifiedPrompt = modifiedPrompt.replace(/"image":\s*"[^"]*"/, `"image":"${imagePath}"`);
+            modifiedPrompt = modifiedPrompt.replace(/"image_path":\s*"[^"]*"/, `"image_path":"${imagePath}"`);
+            modifiedPrompt = modifiedPrompt.replace(/"filename":\s*"[^"]*"/, `"filename":"${imagePath.split('/').pop().split('\\').pop()}"`);
+            
+            queueCollection.push(modifiedPrompt);
+            statusCollection.push({"progress":0,"promptId":"","output":""});
+        });
+        refreshAll();
+        return;
     }
 
     closeModal();
@@ -241,6 +292,11 @@ function refreshAll(){
 function refreshLocalStore(){
     let t1 = "["
     queueCollection.forEach((item,index)=>{
+        // Save batch image list
+        const batchImages = document.getElementById("batchImageInput").value;
+        if(batchImages){
+            localStorage.setItem("batchImageList", batchImages);
+        }
         if(index == (queueCollection.length-1)){
             t1 += `${item.toString()}`
         }else{
@@ -265,16 +321,17 @@ function refreshLocalStore(){
 
 function refreshList(){
     let dom = ""
-
+    let outputURL = "";
     if(isBusy){
         queueCollection.forEach((item,index)=>{
+            outputURL = ImgUrlOptr(statusCollection[index]['output']); 
             dom += `<li class="flex p-6 border justify-between ${(index == activeIndex)?'border-lime-500 bg-lime-200': ((statusCollection[index]['output']=='') ? 'border-slate-200 border-slate-100':'border-lime-200 bg-lime-100') }">
             <div class="ml-4 flex items-center gap-4 flex-1">
                 <h1 class="text-xl">Queue No. ${index + 1}</h1>
                 <div class="grow w-4/5 bg-gray-300 rounded-full h-2.5">
                   <div class="bg-green-600 h-2.5 rounded-full" style="width: ${statusCollection[index]['progress']}%"></div>
                 </div>
-                <a class="${(statusCollection[index]['output']=='') ? 'hidden':''} inline-flex items-start mr-3" href="#0" onclick="displayImg('${statusCollection[index]['output']}')">
+                <a class="${(statusCollection[index]['output']=='') ? 'hidden':''} inline-flex items-start mr-3" href="#0" onclick="displayImg('${outputURL}')">
                      <svg class="w-10 h-10 text-green-100" height="10" width="10" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path d="M0 96C0 60.7 28.7 32 64 32H448c35.3 0 64 28.7 64 64V416c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V96zM323.8 202.5c-4.5-6.6-11.9-10.5-19.8-10.5s-15.4 3.9-19.8 10.5l-87 127.6L170.7 297c-4.6-5.7-11.5-9-18.7-9s-14.2 3.3-18.7 9l-64 80c-5.8 7.2-6.9 17.1-2.9 25.4s12.4 13.6 21.6 13.6h96 32H424c8.9 0 17.1-4.9 21.2-12.8s3.6-17.4-1.4-24.7l-120-176zM112 192a48 48 0 1 0 0-96 48 48 0 1 0 0 96z"/></svg>
                 </a>
             </div>
@@ -282,13 +339,14 @@ function refreshList(){
         });
     }else{
         queueCollection.forEach((item,index)=>{
+            outputURL = ImgUrlOptr(statusCollection[index]['output']); 
             dom += `<li class="flex p-6 border justify-between ${(statusCollection[index]['output']=='') ? 'border-gray-200 bg-gray-100':'border-lime-200 bg-lime-100'}">
             <div class="ml-4 flex items-center gap-4 flex-1">
                 <h1 class="text-xl" onclick="setCurrentIndex(${index});openModal();"><a href="#">Queue No. ${index + 1}</a></h1>
                 <div class="grow w-3/5 bg-gray-300 rounded-full h-1.5">
                   <div class="bg-green-600 h-2.5 rounded-full" style="width: ${statusCollection[index]['progress']}%"></div>
                 </div>
-                <a class="${(statusCollection[index]['output']=='') ? 'hidden':''} inline-flex items-start mr-3" href="#0" onclick="displayImg('${statusCollection[index]['output']}')">
+                <a class="${(statusCollection[index]['output']=='') ? 'hidden':''} inline-flex items-start mr-3" href="#0" onclick="displayImg('${outputURL}')">
                      <svg class="w-10 h-10 text-green-100" height="10" width="10" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path d="M0 96C0 60.7 28.7 32 64 32H448c35.3 0 64 28.7 64 64V416c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V96zM323.8 202.5c-4.5-6.6-11.9-10.5-19.8-10.5s-15.4 3.9-19.8 10.5l-87 127.6L170.7 297c-4.6-5.7-11.5-9-18.7-9s-14.2 3.3-18.7 9l-64 80c-5.8 7.2-6.9 17.1-2.9 25.4s12.4 13.6 21.6 13.6h96 32H424c8.9 0 17.1-4.9 21.2-12.8s3.6-17.4-1.4-24.7l-120-176zM112 192a48 48 0 1 0 0-96 48 48 0 1 0 0 96z"/></svg>
                 </a>
                 <button onclick="removeItem(${index})" type="button" class="font-medium text-red-600 hover:text-red-500">Remove</button>
@@ -333,8 +391,21 @@ function closeImgModal(){
     imgModal.classList.add("hidden");
 }
 
+function ImgUrlOptr(imgURL){
+    console.log("ImgUrlOptr:",imgURL);
+
+    // 先解码URL
+    const decodedURL = decodeURIComponent(imgURL);
+    // 处理Windows路径中的反斜杠
+    const processedURL = decodedURL.replace(/\\/g, '/');
+
+    return processedURL;
+}
+
 function displayImg(imgURL){
+
     const imgContainer = document.getElementById("imgContainer");
+
     imgContainer.innerHTML = `<img
                             alt="gallery"
                             class="block h-full w-full rounded-lg object-cover object-center"

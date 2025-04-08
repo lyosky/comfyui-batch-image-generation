@@ -27,7 +27,7 @@ git clone git@github.com:rsandagon/comfyui-batch-image-generation.git
 
 Once downloaded. Extract the files to your Comfy directory `<Installation Path>\ComfyUI\web`
 
-You may now run the application using the url `http://127.0.0.1:8188/batch.htm`.
+You may now run the application using the url `http://127.0.0.1:8188/batch.html`.
 
 
 ## Frequently Asked Questions
@@ -48,3 +48,21 @@ You may modify the `var COMFTY_URL = "http://127.0.0.1:8188"` from `app.js` to p
 2. CompVis, [StableDiffusion team](https://huggingface.co/CompVis) for continuing to maintain StableDiffuion models and having it opensourced.
 3. Hugging Face [Optimum](https://github.com/huggingface/optimum) team for making the BetterTransformer API so easily accessible.
 
+## 修改server.py
+```
+@routes.get("/batch")
+        async def batch_handler(request):
+            batch_file = os.path.join(self.web_root, "batch.html")
+
+            if not os.path.exists(batch_file):
+                raise web.HTTPNotFound(text=f"File not found: {batch_file}")
+
+            return web.FileResponse(batch_file)
+```
+
+文件存放路径
+```
+D:\ComfyUI-aki-v1.3\python\Lib\site-packages\comfyui_frontend_package\static
+```
+
+You may now run the application using the url `http://127.0.0.1:8188/batch`.
